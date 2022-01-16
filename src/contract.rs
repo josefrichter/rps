@@ -1,6 +1,6 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr};
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
@@ -41,7 +41,16 @@ pub fn execute(
     match msg {
         ExecuteMsg::Increment {} => try_increment(deps),
         ExecuteMsg::Reset { count } => try_reset(deps, info, count),
+        ExecuteMsg::StartGame { opponent } => try_startgame(deps, info, opponent),
     }
+}
+
+pub fn try_startgame(deps: DepsMut, info: MessageInfo, opponent: String) -> Result<Response, ContractError> {
+    // check Addr
+    let checked_opponent: Addr = deps.api.addr_validate(&opponent)?;
+
+    // store opponent
+    Ok(Response::new().add_attribute("method", "try_startgame"))
 }
 
 pub fn try_increment(deps: DepsMut) -> Result<Response, ContractError> {
@@ -79,7 +88,7 @@ fn query_count(deps: Deps) -> StdResult<CountResponse> {
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{coins, from_binary};
+    use cosmwasm_std::{coins, from_binary, StdError};
 
     #[test]
     fn proper_initialization() {
@@ -96,6 +105,23 @@ mod tests {
         let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
         let value: CountResponse = from_binary(&res).unwrap();
         assert_eq!(17, value.count);
+    }
+
+    #[test]
+    fn start_game() {
+        let mut deps = mock_dependencies(&coins(2, "token"));
+
+        let info = mock_info("anyone", &coins(2, "token"));
+        let msg = ExecuteMsg::StartGame { opponent: "".to_string() };
+        let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+        assert!(
+            matches!(err, ContractError::Std(StdError::GenericErr { msg: _ })),
+        );
+
+        let info = mock_info("anyone", &coins(2, "token"));
+        let msg = ExecuteMsg::StartGame { opponent: "oprah".to_string() };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0); // TODO: is this a correct test?
     }
 
     #[test]
