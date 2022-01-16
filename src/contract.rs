@@ -5,7 +5,7 @@ use cw2::set_contract_version;
 
 use crate::error::ContractError;
 use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{State, STATE};
+use crate::state::{State, STATE, GameData, GAMES, GameResult, GameMove};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:rps";
@@ -41,15 +41,24 @@ pub fn execute(
     match msg {
         ExecuteMsg::Increment {} => try_increment(deps),
         ExecuteMsg::Reset { count } => try_reset(deps, info, count),
-        ExecuteMsg::StartGame { opponent } => try_startgame(deps, info, opponent),
+        ExecuteMsg::StartGame { opponent, host_move } => try_startgame(deps, info, opponent, host_move),
     }
 }
 
-pub fn try_startgame(deps: DepsMut, info: MessageInfo, opponent: String) -> Result<Response, ContractError> {
+pub fn try_startgame(deps: DepsMut, info: MessageInfo, opponent: Addr, host_move: GameMove) -> Result<Response, ContractError> {
     // check Addr
-    let checked_opponent: Addr = deps.api.addr_validate(&opponent)?;
+    let checked_opponent: Addr = deps.api.addr_validate(&opponent.to_string())?;
 
-    // store opponent
+    let store = deps.storage;
+    let gamedata = GameData {
+        host: info.sender.clone(), // TODO: need to clone() here?
+        opponent:  checked_opponent,
+        host_move: host_move,
+        opp_move: GameMove::NotCastYet {},
+        result: GameResult::NotDecidedYet {},
+    };
+
+    GAMES.save(store, info.sender.as_str(), &gamedata)?;
     Ok(Response::new().add_attribute("method", "try_startgame"))
 }
 
@@ -112,14 +121,14 @@ mod tests {
         let mut deps = mock_dependencies(&coins(2, "token"));
 
         let info = mock_info("anyone", &coins(2, "token"));
-        let msg = ExecuteMsg::StartGame { opponent: "".to_string() };
+        let msg = ExecuteMsg::StartGame { opponent: Addr::unchecked(""), host_move: GameMove::Scissors {}};
         let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
         assert!(
             matches!(err, ContractError::Std(StdError::GenericErr { msg: _ })),
         );
 
         let info = mock_info("anyone", &coins(2, "token"));
-        let msg = ExecuteMsg::StartGame { opponent: "oprah".to_string() };
+        let msg = ExecuteMsg::StartGame { opponent: Addr::unchecked("oprah"), host_move: GameMove::Scissors {}};
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(res.messages.len(), 0); // TODO: is this a correct test?
     }
