@@ -109,14 +109,14 @@ fn query_games_by_opponent(deps: Deps, opponent: Addr) -> StdResult<GamesListRes
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info, mock_dependencies_with_balance};
     use cosmwasm_std::{coins, from_binary, StdError};
     use crate::msg::{GamesListResponse};
     use crate::state::{GameData, GameMove, GameResult};
 
     #[test]
     fn proper_initialization() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = mock_dependencies();
 
         let info = mock_info("creator", &coins(1000, "earth"));
 
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn start_game() {
-        let mut deps = mock_dependencies(&coins(2, "token"));
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
 
         let info = mock_info("anyone", &coins(2, "token"));
         let msg = ExecuteMsg::StartGame { opponent: Addr::unchecked(""), host_move: GameMove::Scissors {}};
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn query_games() {
-        let mut deps = mock_dependencies(&coins(2, "token"));
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
 
         // games for "tony" should be empty initially
         let res = query(deps.as_ref(), mock_env(), QueryMsg::GetGamesByPlayer{ player: Addr::unchecked("tony") }).unwrap();
