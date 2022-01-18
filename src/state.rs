@@ -37,4 +37,4 @@ pub struct GameData {
     pub result: GameResult,
 }
 
-pub const GAMES: Map<&str, GameData> = Map::new("games");
+pub const GAMES: Map<(&Addr, &Addr), GameData> = Map::new("games");
