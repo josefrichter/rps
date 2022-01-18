@@ -5,7 +5,7 @@ use cw2::set_contract_version;
 
 use crate::error::{ContractError};
 use crate::msg::{GamesListResponse, ExecuteMsg, QueryMsg};
-use crate::state::{State, STATE, GameData, GAMES, GameResult, GameMove};
+use crate::state::{State, STATE, GameData, GAMES, GameMove};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:rps";
@@ -47,10 +47,10 @@ pub fn try_startgame(deps: DepsMut, info: MessageInfo, opponent: Addr, host_move
     let store = deps.storage;
     let gamedata = GameData {
         host: info.sender.clone(), // TODO: need to clone() here?
-        opponent:  checked_opponent.clone(), // TODO: need to clone() here?
+        opponent:  Some(checked_opponent.clone()), // TODO: need to clone() here?
         host_move: host_move,
-        opp_move: GameMove::NotCastYet {},
-        result: GameResult::NotDecidedYet {},
+        opp_move: None,
+        result: None,
     };
 
     GAMES.save(store, (&info.sender, &checked_opponent), &gamedata)?;
@@ -71,7 +71,7 @@ fn query_games(deps: Deps, player: Addr) -> StdResult<GamesListResponse> {
     let games_by_player = GAMES
         .range(deps.storage, None, None, Order::Ascending)
         .flat_map(|r| match r {
-            Ok((_, data)) if data.host == Addr::unchecked(&player) || data.opponent == Addr::unchecked(&player) => Some(data),
+            Ok((_, data)) if data.host == Addr::unchecked(&player) || data.opponent == Some(Addr::unchecked(&player)) => Some(data),
             _ => None
         })
         .collect::<Vec<_>>();
@@ -98,7 +98,7 @@ fn query_games_by_opponent(deps: Deps, opponent: Addr) -> StdResult<GamesListRes
     let games_by_opponent = GAMES
         .range(deps.storage, None, None, Order::Ascending)
         .flat_map(|r| match r {
-            Ok((_, data)) if data.opponent == Addr::unchecked(&opponent) => Some(data),
+            Ok((_, data)) if data.opponent == Some(Addr::unchecked(&opponent)) => Some(data),
             _ => None
         })
         .collect::<Vec<_>>();
@@ -112,7 +112,7 @@ mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info, mock_dependencies_with_balance};
     use cosmwasm_std::{coins, from_binary, StdError};
     use crate::msg::{GamesListResponse};
-    use crate::state::{GameData, GameMove, GameResult};
+    use crate::state::{GameData, GameMove};
 
     #[test]
     fn proper_initialization() {
@@ -166,7 +166,7 @@ mod tests {
         let tonys_gameslist: GamesListResponse = from_binary(&res).unwrap();
         assert_eq!(
             tonys_gameslist.games,
-            [GameData { host: Addr::unchecked("tony"), opponent: Addr::unchecked("oprah"), host_move: GameMove::Scissors {}, opp_move: GameMove::NotCastYet {}, result: GameResult::NotDecidedYet {} }]
+            [GameData { host: Addr::unchecked("tony"), opponent: Some(Addr::unchecked("oprah")), host_move: GameMove::Scissors {}, opp_move: None, result: None }]
         )
     }
 }
