@@ -4,9 +4,16 @@ use cosmwasm_std::Addr;
 use crate::state::{GameMove, GameData};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct InstantiateMsg {
+    pub admin: Addr,
+}
+
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    StartGame { opponent: Addr, host_move: GameMove }
+    StartGame { opponent: Addr, host_move: GameMove },
+    UpdateAdmin { admin: Addr }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

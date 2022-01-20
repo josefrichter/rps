@@ -47,6 +47,8 @@ cw2 = "0.11"
 schemars = "0.8"
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 thiserror = { version = "1.0" }
+cw-controllers = "0.11.1"
+cw-utils = "0.11.1"
 
 [dev-dependencies]
 cosmwasm-schema = { version = "1.0.0-beta" }
