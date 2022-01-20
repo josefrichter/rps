@@ -4,9 +4,10 @@ use serde::{Deserialize, Serialize};
 use cosmwasm_std::Addr;
 use cw_storage_plus::{Item, Map};
 
-use cw_controllers::{Admin};
+use cw_controllers::{Admin, Hooks};
 
 pub const ADMIN: Admin = Admin::new("admin");
+pub const BLACKLIST: Hooks = Hooks::new("blacklist");
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct State {

@@ -1,14 +1,16 @@
+// use std::ops::RangeBounds;
+
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr, Order};
 use cw2::set_contract_version;
 
 use cw_utils::{maybe_addr};
-use cw_controllers::{AdminError, AdminResponse};
+use cw_controllers::{AdminError, AdminResponse, Admin, HookError};
 
 use crate::error::{ContractError};
 use crate::msg::{GamesListResponse, ExecuteMsg, QueryMsg, InstantiateMsg};
-use crate::state::{GameData, GAMES, GameMove, ADMIN};
+use crate::state::{GameData, GAMES, GameMove, ADMIN, BLACKLIST};
 
 const CONTRACT_NAME: &str = "crates.io:rps";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -41,12 +43,24 @@ pub fn execute(
     match msg {
         ExecuteMsg::StartGame { opponent, host_move } => Ok(try_startgame(deps, info, opponent, host_move)?),
         ExecuteMsg::UpdateAdmin { admin } => Ok(try_updateadmin(deps, info, admin)?),
+        ExecuteMsg::AddToBlacklist { addr } => Ok(try_addtoblacklist(ADMIN, deps, info, addr)?),
+        ExecuteMsg::RemoveFromBlacklist { addr } => Ok(try_removefromblacklist(ADMIN, deps, info, addr)?),
     }
 }
 
 pub fn try_startgame(deps: DepsMut, info: MessageInfo, opponent: Addr, host_move: GameMove) -> Result<Response, ContractError> {
     // check Addr
     let checked_opponent: Addr = deps.api.addr_validate(&opponent.to_string())?;
+    let blacklist = BLACKLIST.query_hooks(deps.as_ref())?;
+
+    if blacklist.hooks.contains(&checked_opponent.to_string()) {
+        return Err(ContractError::Blacklisted { addr: checked_opponent });
+    }
+
+    if blacklist.hooks.contains(&info.sender.to_string()) {
+        return Err(ContractError::Blacklisted { addr: info.sender });
+    }
+
 
     let store = deps.storage;
     let gamedata = GameData {
@@ -64,6 +78,16 @@ pub fn try_startgame(deps: DepsMut, info: MessageInfo, opponent: Addr, host_move
 pub fn try_updateadmin(deps: DepsMut, info: MessageInfo, admin: Addr) -> Result<Response, AdminError> {
     let maybe_admin = maybe_addr(deps.api, Some(admin.to_string()))?;
     ADMIN.execute_update_admin(deps, info, maybe_admin)
+}
+
+pub fn try_addtoblacklist(admin: Admin, deps: DepsMut, info: MessageInfo, addr: Addr) -> Result<Response, HookError> {
+    let checked_addr = deps.api.addr_validate(&addr.to_string())?;
+    BLACKLIST.execute_add_hook(&admin, deps, info, checked_addr)
+}
+
+pub fn try_removefromblacklist(admin: Admin, deps: DepsMut, info: MessageInfo, addr: Addr) -> Result<Response, HookError> {
+    let checked_addr = deps.api.addr_validate(&addr.to_string())?;
+    BLACKLIST.execute_remove_hook(&admin, deps, info, checked_addr)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -155,6 +179,109 @@ mod tests {
         let msg = ExecuteMsg::StartGame { opponent: Addr::unchecked("oprah"), host_move: GameMove::Scissors {}};
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(res.messages.len(), 0); // TODO: is this a correct test?
+    }
+
+    #[test]
+    fn add_to_and_remove_from_blacklist() {
+        let mut deps = mock_dependencies();
+
+        // instantiate by "creator", with admin "bobby"
+        let info = mock_info("creator", &coins(1000, "earth"));
+        let msg = InstantiateMsg { admin: Addr::unchecked("bobby") };
+        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // add "black" to blacklist
+        let info = mock_info("bobby", &coins(2, "token"));
+        let msg = ExecuteMsg::AddToBlacklist { addr: Addr::unchecked("black") };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0); // TODO: is this a correct test?
+
+        // check "black" is on blacklist
+        let blacklist = BLACKLIST.query_hooks(deps.as_ref()).unwrap();
+        assert_eq!(blacklist.hooks, ["black"]);
+
+        // remove "black" from blacklist
+        let info = mock_info("bobby", &coins(2, "token"));
+        let msg = ExecuteMsg::RemoveFromBlacklist { addr: Addr::unchecked("black") };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0); // TODO: is this a correct test?
+
+        // check blacklist is empty now
+        let blacklist = BLACKLIST.query_hooks(deps.as_ref()).unwrap();
+        assert_eq!(blacklist.hooks, [] as [&str; 0]);
+    }
+
+    #[test]
+    fn blacklisted_addr_cannot_start_game() {
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+
+        // instantiate by "creator", with admin "creator"
+        let info = mock_info("creator", &coins(1000, "earth"));
+        let msg = InstantiateMsg { admin: Addr::unchecked("creator") };
+        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // add "black" to blacklist
+        let info = mock_info("creator", &coins(2, "token"));
+        let msg = ExecuteMsg::AddToBlacklist { addr: Addr::unchecked("black") };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0); // TODO: is this a correct test?
+
+        // start game by "black" against "anyone" should fail
+        let info = mock_info("black", &coins(2, "token"));
+        let msg = ExecuteMsg::StartGame { opponent: Addr::unchecked("anyone"), host_move: GameMove::Scissors {}};
+        let err = execute(deps.as_mut(), mock_env(), info, msg);
+        let err_unwrapped = err.unwrap_err().downcast::<ContractError>().unwrap();
+        assert_eq!(*err_unwrapped, ContractError::Blacklisted { addr: Addr::unchecked("black")});
+
+        // remove "black" from blacklist
+        let info = mock_info("creator", &coins(2, "token"));
+        let msg = ExecuteMsg::RemoveFromBlacklist { addr: Addr::unchecked("black") };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0);
+
+        // start game by "black" agains "anyone" again should succeed now
+        let info = mock_info("black", &coins(2, "token"));
+        let msg = ExecuteMsg::StartGame { opponent: Addr::unchecked("anyone"), host_move: GameMove::Scissors {}};
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0);
+    }
+
+    #[test]
+    fn cannot_start_game_against_blacklisted() {
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+
+        // instantiate by "creator", with admin "creator"
+        let info = mock_info("creator", &coins(1000, "earth"));
+        let msg = InstantiateMsg { admin: Addr::unchecked("creator") };
+        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // add "black" to blacklist
+        let info = mock_info("creator", &coins(2, "token"));
+        let msg = ExecuteMsg::AddToBlacklist { addr: Addr::unchecked("black") };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0); // TODO: is this a correct test?
+
+        // start game by "creator" against "black" should fail
+        let info = mock_info("creator", &coins(2, "token"));
+        let msg = ExecuteMsg::StartGame { opponent: Addr::unchecked("black"), host_move: GameMove::Scissors {}};
+        let err = execute(deps.as_mut(), mock_env(), info, msg);
+        let err_unwrapped = err.unwrap_err().downcast::<ContractError>().unwrap();
+        assert_eq!(*err_unwrapped, ContractError::Blacklisted { addr: Addr::unchecked("black")});
+
+        // remove "black" from blacklist
+        let info = mock_info("creator", &coins(2, "token"));
+        let msg = ExecuteMsg::RemoveFromBlacklist { addr: Addr::unchecked("black") };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0);
+
+        // start game by "creator" agains "black" again should succeed now
+        let info = mock_info("creator", &coins(2, "token"));
+        let msg = ExecuteMsg::StartGame { opponent: Addr::unchecked("black"), host_move: GameMove::Scissors {}};
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0);
     }
 
     #[test]

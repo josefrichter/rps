@@ -13,7 +13,9 @@ pub struct InstantiateMsg {
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
     StartGame { opponent: Addr, host_move: GameMove },
-    UpdateAdmin { admin: Addr }
+    UpdateAdmin { admin: Addr },
+    AddToBlacklist { addr: Addr },
+    RemoveFromBlacklist { addr: Addr }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
