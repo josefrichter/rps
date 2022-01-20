@@ -4,7 +4,7 @@ use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response,
 use cw2::set_contract_version;
 
 use cw_utils::{maybe_addr};
-use cw_controllers::{AdminError};
+use cw_controllers::{AdminError, AdminResponse};
 
 use crate::error::{ContractError};
 use crate::msg::{GamesListResponse, ExecuteMsg, QueryMsg, InstantiateMsg};
@@ -72,6 +72,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::GetGamesByPlayer { player } => to_binary(&query_games(deps, player)?),
         QueryMsg::GetGamesByHost { host } => to_binary(&query_games_by_host(deps, host)?),
         QueryMsg::GetGamesByOpponent { opponent } => to_binary(&query_games_by_opponent(deps, opponent)?),
+        QueryMsg::GetAdmin {} => to_binary(&query_admin(deps)?),
     }
 }
 
@@ -115,6 +116,10 @@ fn query_games_by_opponent(deps: Deps, opponent: Addr) -> StdResult<GamesListRes
     Ok(GamesListResponse { games: games_by_opponent })
 }
 
+fn query_admin(deps: Deps) -> StdResult<AdminResponse> {
+    Ok(ADMIN.query_admin(deps)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,6 +158,25 @@ mod tests {
     }
 
     #[test]
+    fn update_admin() {
+        // instantiate by "creator", setting "bobby" as admin
+        let mut deps = mock_dependencies();
+
+        let info = mock_info("creator", &coins(1000, "earth"));
+        let msg = InstantiateMsg { admin: Addr::unchecked("bobby") };
+
+        // we can just call .unwrap() to assert this was a success
+        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // now only "bobby" can update admin
+        let info = mock_info("bobby", &coins(2, "token"));
+        let msg = ExecuteMsg::UpdateAdmin { admin: Addr::unchecked("adrianne") };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0); // TODO: is this a correct test?
+    }
+
+    #[test]
     fn query_games() {
         let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
 
@@ -178,5 +202,23 @@ mod tests {
             tonys_gameslist.games,
             [GameData { host: Addr::unchecked("tony"), opponent: Some(Addr::unchecked("oprah")), host_move: GameMove::Scissors {}, opp_move: None, result: None }]
         )
+    }
+
+    #[test]
+    fn query_admin() {
+        // instantiate by "creator", setting "bobby" as admin
+        let mut deps = mock_dependencies();
+
+        let info = mock_info("creator", &coins(1000, "earth"));
+        let msg = InstantiateMsg { admin: Addr::unchecked("bobby") };
+
+        // we can just call .unwrap() to assert this was a success
+        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // check that admin is "bobby"
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetAdmin {}).unwrap();
+        let adminresponse: AdminResponse = from_binary(&res).unwrap();
+        assert_eq!(adminresponse.admin, Some("bobby".to_string()));
     }
 }

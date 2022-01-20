@@ -23,11 +23,11 @@ pub enum QueryMsg {
     GetGamesByPlayer { player: Addr },
     GetGamesByHost { host: Addr },
     GetGamesByOpponent { opponent: Addr },
+    GetAdmin {},
 }
 
 // We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct GamesListResponse {
-    // pub games: Vec<(Vec<u8>, GameData)>,
     pub games: Vec<GameData>,
 }
