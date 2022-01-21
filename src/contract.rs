@@ -12,7 +12,7 @@ use cw_utils::maybe_addr;
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, GamesListResponse, InstantiateMsg, QueryMsg};
-use crate::state::{GameData, GameMove, ADMIN, BLACKLIST, GAMES};
+use crate::state::{Game, GameMove, ADMIN, BLACKLIST, GAMES};
 
 const CONTRACT_NAME: &str = "crates.io:rps";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -71,7 +71,7 @@ pub fn try_startgame(
     }
 
     let store = deps.storage;
-    let gamedata = GameData {
+    let game = Game {
         host: info.sender.clone(),                // TODO: need to clone() here?
         opponent: Some(checked_opponent.clone()), // TODO: need to clone() here?
         host_move: host_move,
@@ -79,7 +79,7 @@ pub fn try_startgame(
         result: None,
     };
 
-    GAMES.save(store, (&info.sender, &checked_opponent), &gamedata)?;
+    GAMES.save(store, (&info.sender, &checked_opponent), &game)?;
     Ok(Response::new().add_attribute("method", "try_startgame"))
 }
 
@@ -180,7 +180,7 @@ fn query_admin(deps: Deps) -> StdResult<AdminResponse> {
 mod tests {
     use super::*;
     use crate::msg::GamesListResponse;
-    use crate::state::{GameData, GameMove, games};
+    use crate::state::{Game, GameMove, games};
     use cosmwasm_std::testing::{
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
@@ -434,7 +434,7 @@ mod tests {
         let tonys_gameslist: GamesListResponse = from_binary(&res).unwrap();
         assert_eq!(
             tonys_gameslist.games,
-            [GameData {
+            [Game {
                 host: Addr::unchecked("tony"),
                 opponent: Some(Addr::unchecked("oprah")),
                 host_move: GameMove::Scissors {},
@@ -465,7 +465,7 @@ mod tests {
     }
 
     #[test]
-    fn gamedata_indexedmap() {
+    fn game_indexedmap() {
         // let mut store = MockStorage::new();
         let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
 
@@ -475,7 +475,7 @@ mod tests {
         let opponent2 = Addr::unchecked("opponent2");
 
         // host1, opponent1
-        let game11 = GameData {
+        let game11 = Game {
             host: host1.clone(),
             opponent: Some(opponent1.clone()),
             host_move: GameMove::Rock {},
@@ -484,7 +484,7 @@ mod tests {
         };
 
         // host1, opponent2
-        let game12 = GameData {
+        let game12 = Game {
             host: host1.clone(),
             opponent: Some(opponent2.clone()),
             host_move: GameMove::Paper {},
@@ -493,7 +493,7 @@ mod tests {
         };
 
         // host2, opponent2
-        let game22 = GameData {
+        let game22 = Game {
             host: host2.clone(),
             opponent: Some(opponent2.clone()),
             host_move: GameMove::Paper {},
@@ -501,7 +501,7 @@ mod tests {
             result: None,
         };
 
-        fn generate_key_for_game(game: &GameData) -> (Addr, Addr) {
+        fn generate_key_for_game(game: &Game) -> (Addr, Addr) {
             (game.host.clone(), game.opponent.clone().unwrap())
         }
 

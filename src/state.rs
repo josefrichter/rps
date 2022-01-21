@@ -31,7 +31,7 @@ pub enum GameResult {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, JsonSchema)]
-pub struct GameData {
+pub struct Game {
     pub host: Addr,
     pub opponent: Option<Addr>,
     pub host_move: GameMove,
@@ -39,42 +39,42 @@ pub struct GameData {
     pub result: Option<GameResult>,
 }
 
-pub const GAMES: Map<(&Addr, &Addr), GameData> = Map::new("games");
+pub const GAMES: Map<(&Addr, &Addr), Game> = Map::new("games");
 
 // INDEXED MAP
 
-pub struct GameDataIndexes<'a> {
+pub struct GameIndexes<'a> {
     // TODO: decide which approach is needed here
     // for host, the pkey is specified as (Addr,Addr) tuple
-    // so that the lookup can return vector like [((Addr,Addr),Gamedata)]
-    pub host: MultiIndex<'a, Addr, GameData, (Addr, Addr)>,
-    // without specifying pkey type, the returned vector is like [((), GameData)]
-    // which in next step can be mapped to just [GameData, GameData,...] - is the key needed at any point?
-    pub opponent: MultiIndex<'a, Addr, GameData>,
-    pub host_opponent_id: UniqueIndex<'a, (Addr, Addr), GameData>,
+    // so that the lookup can return vector like [((Addr,Addr), Game)]
+    pub host: MultiIndex<'a, Addr, Game, (Addr, Addr)>,
+    // without specifying pkey type, the returned vector is like [((), Game)]
+    // which in next step can be mapped to just [Game, Game,...] - is the key needed at any point?
+    pub opponent: MultiIndex<'a, Addr, Game>,
+    pub host_opponent_id: UniqueIndex<'a, (Addr, Addr), Game>,
 }
 
 // this may become a macro, not important just boilerplate, builds the list of indexes for later use
-impl<'a> IndexList<GameData> for GameDataIndexes<'a> {
-    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<GameData>> + '_> {
-        let v: Vec<&dyn Index<GameData>> = vec![&self.host, &self.opponent, &self.host_opponent_id];
+impl<'a> IndexList<Game> for GameIndexes<'a> {
+    fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<Game>> + '_> {
+        let v: Vec<&dyn Index<Game>> = vec![&self.host, &self.opponent, &self.host_opponent_id];
         Box::new(v.into_iter())
     }
 }
 
-pub fn games<'a>() -> IndexedMap<'a, (Addr, Addr), GameData, GameDataIndexes<'a>> {
-    let indexes = GameDataIndexes {
+pub fn games<'a>() -> IndexedMap<'a, (Addr, Addr), Game, GameIndexes<'a>> {
+    let indexes = GameIndexes {
         host: MultiIndex::new(|d|
             d.host.clone(), // opponent needs to be unwrapped, coz it's Option
             "games",
-            "gamedata__host"),
+            "game__host"),
         opponent: MultiIndex::new(|d|
             d.opponent.clone().unwrap(), // opponent needs to be unwrapped, coz it's Option
             "games",
-            "gamedata__opponent"),
+            "game__opponent"),
         host_opponent_id: UniqueIndex::new(|d|
             (d.host.clone(), d.opponent.clone().unwrap()),
-            "gamedata__host_opponent_id")
+            "game__host_opponent_id")
     };
     IndexedMap::new("games", indexes)
 }
