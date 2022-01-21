@@ -33,7 +33,7 @@ pub enum GameResult {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, JsonSchema)]
 pub struct Game {
     pub host: Addr,
-    pub opponent: Option<Addr>,
+    pub opponent: Addr,
     pub host_move: GameMove,
     pub opp_move: Option<GameMove>,
     pub result: Option<GameResult>,
@@ -67,11 +67,11 @@ pub fn games<'a>() -> IndexedMap<'a, (Addr, Addr), Game, GameIndexes<'a>> {
             "games",
             "game__host"),
         opponent: MultiIndex::new(|d|
-            d.opponent.clone().unwrap(), // opponent needs to be unwrapped, coz it's Option
+            d.opponent.clone(), // opponent needs to be unwrapped, coz it's Option
             "games",
             "game__opponent"),
         host_opponent_id: UniqueIndex::new(|d|
-            (d.host.clone(), d.opponent.clone().unwrap()),
+            (d.host.clone(), d.opponent.clone()),
             "game__host_opponent_id")
     };
     IndexedMap::new("games", indexes)

@@ -72,7 +72,7 @@ pub fn try_startgame(
 
     let game = Game {
         host: info.sender.clone(),                // TODO: need to clone() here?
-        opponent: Some(checked_opponent.clone()), // TODO: need to clone() here?
+        opponent: checked_opponent.clone(), // TODO: need to clone() here?
         host_move: host_move,
         opp_move: None,
         result: None,
@@ -98,7 +98,7 @@ pub fn save_game(deps: DepsMut, game: Game) -> Result<Game, ContractError> {
 }
 
 pub fn generate_key_for_game(game: &Game) -> (Addr, Addr) {
-    (game.host.clone(), game.opponent.clone().unwrap())
+    (game.host.clone(), game.opponent.clone())
 }
 
 
@@ -448,7 +448,7 @@ mod tests {
             tonys_gameslist.games,
             [Game {
                 host: Addr::unchecked("tony"),
-                opponent: Some(Addr::unchecked("oprah")),
+                opponent: Addr::unchecked("oprah"),
                 host_move: GameMove::Scissors {},
                 opp_move: None,
                 result: None
@@ -489,7 +489,7 @@ mod tests {
         // host1, opponent1
         let game11 = Game {
             host: host1.clone(),
-            opponent: Some(opponent1.clone()),
+            opponent: opponent1.clone(),
             host_move: GameMove::Rock {},
             opp_move: None,
             result: None,
@@ -498,7 +498,7 @@ mod tests {
         // host1, opponent2
         let game12 = Game {
             host: host1.clone(),
-            opponent: Some(opponent2.clone()),
+            opponent: opponent2.clone(),
             host_move: GameMove::Paper {},
             opp_move: None,
             result: None,
@@ -507,7 +507,7 @@ mod tests {
         // host2, opponent2
         let game22 = Game {
             host: host2.clone(),
-            opponent: Some(opponent2.clone()),
+            opponent: opponent2.clone(),
             host_move: GameMove::Paper {},
             opp_move: None,
             result: None,
