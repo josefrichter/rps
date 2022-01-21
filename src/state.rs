@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use cosmwasm_std::Addr;
-use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
+use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex, UniqueIndex};
 
 use cw_controllers::{Admin, Hooks};
 
@@ -46,25 +46,32 @@ pub const GAMES: Map<(&Addr, &Addr), GameData> = Map::new("games");
 pub struct GameDataIndexes<'a> {
     // secondary index by opponent address
     // the last key is the primary key which is an auto incremented token counter
-    // pub host: MultiIndex<'a, Addr, GameData>,
-    pub opponent: MultiIndex<'a, (Addr, Addr), GameData>,
+    pub host: MultiIndex<'a, Addr, GameData>,
+    pub opponent: MultiIndex<'a, Addr, GameData>,
+    pub host_opponent_id: UniqueIndex<'a, (Addr, Addr), GameData>,
 }
 
 // this may become a macro, not important just boilerplate, builds the list of indexes for later use
 impl<'a> IndexList<GameData> for GameDataIndexes<'a> {
     fn get_indexes(&'_ self) -> Box<dyn Iterator<Item = &'_ dyn Index<GameData>> + '_> {
-        let v: Vec<&dyn Index<GameData>> = vec![&self.opponent];
+        let v: Vec<&dyn Index<GameData>> = vec![&self.host, &self.opponent, &self.host_opponent_id];
         Box::new(v.into_iter())
     }
 }
 
 pub fn games<'a>() -> IndexedMap<'a, (&'a Addr, &'a Addr), GameData, GameDataIndexes<'a>> {
     let indexes = GameDataIndexes {
-        // host: MultiIndex::new(|d| d.host.clone(), "games", "gamedata__host"),
+        host: MultiIndex::new(|d|
+            d.host.clone(), // opponent needs to be unwrapped, coz it's Option
+            "games",
+            "gamedata__host"),
         opponent: MultiIndex::new(|d|
-            (d.opponent.clone().unwrap(), d.host.clone()), // opponent needs to be unwrapped, coz it's Option
+            d.opponent.clone().unwrap(), // opponent needs to be unwrapped, coz it's Option
             "games",
             "gamedata__opponent"),
+        host_opponent_id: UniqueIndex::new(|d|
+            (d.host.clone(), d.opponent.clone().unwrap()),
+            "gamedata__host_opponent_id")
     };
     IndexedMap::new("games", indexes)
 }

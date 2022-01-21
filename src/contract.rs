@@ -505,7 +505,7 @@ mod tests {
         games()
             .update(
                 &mut deps.storage,
-                (&game11.clone().opponent.unwrap(), &game11.clone().host),
+                (&game11.clone().host, &game11.clone().opponent.unwrap()),
                 |old| match old {
                     Some(_) => Err(ContractError::DuplicateGame {}),
                     None => Ok(game11.clone()),
@@ -516,7 +516,7 @@ mod tests {
         games()
             .update(
                 &mut deps.storage,
-                (&game12.clone().opponent.unwrap(), &game12.clone().host),
+                (&game12.clone().host, &game12.clone().opponent.unwrap()),
                 |old| match old {
                     Some(_) => Err(ContractError::DuplicateGame {}),
                     None => Ok(game12.clone()),
@@ -527,7 +527,7 @@ mod tests {
         games()
             .update(
                 &mut deps.storage,
-                (&game22.clone().opponent.unwrap(), &game22.clone().host),
+                (&game22.clone().host, &game22.clone().opponent.unwrap()),
                 |old| match old {
                     Some(_) => Err(ContractError::DuplicateGame {}),
                     None => Ok(game22.clone()),
@@ -538,33 +538,47 @@ mod tests {
 
         // load all games
         let list = games()
-            // .idx
-            // .opponent
-            // .prefix(opponent2.clone())
             .range(&mut deps.storage, None, None, Order::Ascending)
-            // .collect::<StdResult<_>>()
             .collect::<Result<Vec<_>, _>>()
-            // .collect()
             .unwrap();
 
+        println!("=== all games ===");
         println!("{:?}", list);
         let (_, t) = &list[0];
         assert_eq!(t, &game11);
         assert_eq!(3, list.len());
 
-        // load games for opponent2
+
+        // load games for host1
         let list = games()
             .idx
-            .opponent
-            .sub_prefix(opponent2.clone())
+            .host
+            .prefix(host1.clone())
             .range(&mut deps.storage, None, None, Order::Ascending)
             .collect::<Result<Vec<(_,_)>, _>>()
             .unwrap();
 
+        println!("=== games for host1 ===");
         println!("{:?}", list);
-        // let (_, t) = &list[0];
-        // assert_eq!(t, &game12);
-        // assert_eq!(2, list.len());
+        let (_, t) = &list[0];
+        assert_eq!(t, &game11);
+        assert_eq!(2, list.len());
+
+
+        // load games for opponent2
+        let list = games()
+            .idx
+            .opponent
+            .prefix(opponent2.clone())
+            .range(&mut deps.storage, None, None, Order::Ascending)
+            .collect::<Result<Vec<(_,_)>, _>>()
+            .unwrap();
+
+        println!("=== games for opponent2 ===");
+        println!("{:?}", list);
+        let (_, t) = &list[0];
+        assert_eq!(t, &game12);
+        assert_eq!(2, list.len());
 
 
         // let keys: Vec<_> = games()
