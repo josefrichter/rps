@@ -12,7 +12,6 @@ use cw_utils::maybe_addr;
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, GamesListResponse, InstantiateMsg, QueryMsg};
-use crate::state::games;
 use crate::state::{GameData, GameMove, ADMIN, BLACKLIST, GAMES};
 
 const CONTRACT_NAME: &str = "crates.io:rps";
@@ -181,7 +180,7 @@ fn query_admin(deps: Deps) -> StdResult<AdminResponse> {
 mod tests {
     use super::*;
     use crate::msg::GamesListResponse;
-    use crate::state::{GameData, GameMove};
+    use crate::state::{GameData, GameMove, games};
     use cosmwasm_std::testing::{
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
@@ -502,10 +501,14 @@ mod tests {
             result: None,
         };
 
+        fn generate_key_for_game(game: &GameData) -> (Addr, Addr) {
+            (game.host.clone(), game.opponent.clone().unwrap())
+        }
+
         games()
             .update(
                 &mut deps.storage,
-                (&game11.clone().host, &game11.clone().opponent.unwrap()),
+                generate_key_for_game(&game11),
                 |old| match old {
                     Some(_) => Err(ContractError::DuplicateGame {}),
                     None => Ok(game11.clone()),
@@ -516,7 +519,7 @@ mod tests {
         games()
             .update(
                 &mut deps.storage,
-                (&game12.clone().host, &game12.clone().opponent.unwrap()),
+                generate_key_for_game(&game12),
                 |old| match old {
                     Some(_) => Err(ContractError::DuplicateGame {}),
                     None => Ok(game12.clone()),
@@ -527,7 +530,7 @@ mod tests {
         games()
             .update(
                 &mut deps.storage,
-                (&game22.clone().host, &game22.clone().opponent.unwrap()),
+                generate_key_for_game(&game22),
                 |old| match old {
                     Some(_) => Err(ContractError::DuplicateGame {}),
                     None => Ok(game22.clone()),
@@ -571,19 +574,13 @@ mod tests {
             .opponent
             .prefix(opponent2.clone())
             .range(&mut deps.storage, None, None, Order::Ascending)
-            .collect::<Result<Vec<(_,_)>, _>>()
-            .unwrap();
+            .map(|kv_item| kv_item.unwrap().1)
+            .collect::<Vec<_>>();
 
         println!("=== games for opponent2 ===");
         println!("{:?}", list);
-        let (_, t) = &list[0];
-        assert_eq!(t, &game12);
+        assert_eq!(list[0], game12);
         assert_eq!(2, list.len());
 
-
-        // let keys: Vec<_> = games()
-        //     .keys_raw(&mut deps.storage, None, None, Order::Ascending)
-        //     .collect();
-        // println!("{:?}", keys);
     }
 }

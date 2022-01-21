@@ -44,9 +44,12 @@ pub const GAMES: Map<(&Addr, &Addr), GameData> = Map::new("games");
 // INDEXED MAP
 
 pub struct GameDataIndexes<'a> {
-    // secondary index by opponent address
-    // the last key is the primary key which is an auto incremented token counter
-    pub host: MultiIndex<'a, Addr, GameData>,
+    // TODO: decide which approach is needed here
+    // for host, the pkey is specified as (Addr,Addr) tuple
+    // so that the lookup can return vector like [((Addr,Addr),Gamedata)]
+    pub host: MultiIndex<'a, Addr, GameData, (Addr, Addr)>,
+    // without specifying pkey type, the returned vector is like [((), GameData)]
+    // which in next step can be mapped to just [GameData, GameData,...] - is the key needed at any point?
     pub opponent: MultiIndex<'a, Addr, GameData>,
     pub host_opponent_id: UniqueIndex<'a, (Addr, Addr), GameData>,
 }
@@ -59,7 +62,7 @@ impl<'a> IndexList<GameData> for GameDataIndexes<'a> {
     }
 }
 
-pub fn games<'a>() -> IndexedMap<'a, (&'a Addr, &'a Addr), GameData, GameDataIndexes<'a>> {
+pub fn games<'a>() -> IndexedMap<'a, (Addr, Addr), GameData, GameDataIndexes<'a>> {
     let indexes = GameDataIndexes {
         host: MultiIndex::new(|d|
             d.host.clone(), // opponent needs to be unwrapped, coz it's Option
