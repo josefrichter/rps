@@ -12,7 +12,7 @@ use cw_utils::maybe_addr;
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, GamesListResponse, InstantiateMsg, QueryMsg};
-use crate::state::{Game, GameMove, ADMIN, BLACKLIST, GAMES};
+use crate::state::{Game, GameMove, ADMIN, BLACKLIST, games};
 
 const CONTRACT_NAME: &str = "crates.io:rps";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -70,7 +70,6 @@ pub fn try_startgame(
         return Err(ContractError::Blacklisted { addr: info.sender });
     }
 
-    let store = deps.storage;
     let game = Game {
         host: info.sender.clone(),                // TODO: need to clone() here?
         opponent: Some(checked_opponent.clone()), // TODO: need to clone() here?
@@ -79,9 +78,29 @@ pub fn try_startgame(
         result: None,
     };
 
-    GAMES.save(store, (&info.sender, &checked_opponent), &game)?;
-    Ok(Response::new().add_attribute("method", "try_startgame"))
+    match save_game(deps, game) {
+        Ok(_game) => Ok(Response::new().add_attribute("method", "try_startgame")),
+        Err(e) => Err(e)
+    }
+    // Ok(Response::new().add_attribute("method", "try_startgame"))
 }
+
+pub fn save_game(deps: DepsMut, game: Game) -> Result<Game, ContractError> {
+    games()
+        .update( // update will fail on duplicate record
+            deps.storage,
+            generate_key_for_game(&game),
+            |old| match old {
+                Some(_) => Err(ContractError::DuplicateGame {}),
+                None => Ok(game),
+            },
+        )
+}
+
+pub fn generate_key_for_game(game: &Game) -> (Addr, Addr) {
+    (game.host.clone(), game.opponent.clone().unwrap())
+}
+
 
 pub fn try_updateadmin(
     deps: DepsMut,
@@ -115,42 +134,35 @@ pub fn try_removefromblacklist(
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetGamesByPlayer { player } => to_binary(&query_games(deps, player)?),
-        QueryMsg::GetGamesByHost { host } => to_binary(&query_games_by_host(deps, host)?),
+        QueryMsg::GetGamesByPlayer { player } => to_binary(&query_games(deps, &player)?),
+        QueryMsg::GetGamesByHost { host } => to_binary(&query_games_by_host(deps, &host)?),
         QueryMsg::GetGamesByOpponent { opponent } => {
-            to_binary(&query_games_by_opponent(deps, opponent)?)
+            to_binary(&query_games_by_opponent(deps, &opponent)?)
         }
         QueryMsg::GetAdmin {} => to_binary(&query_admin(deps)?),
     }
 }
 
-fn query_games(deps: Deps, player: Addr) -> StdResult<GamesListResponse> {
-    let games_by_player = GAMES
-        .range(deps.storage, None, None, Order::Ascending)
-        .flat_map(|r| match r {
-            Ok((_, data))
-                if data.host == Addr::unchecked(&player)
-                    || data.opponent == Some(Addr::unchecked(&player)) =>
-            {
-                Some(data)
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+fn query_games(deps: Deps, player: &Addr) -> StdResult<GamesListResponse> {
+    let mut games = vec![];
+    let mut games_by_host = query_games_by_host(deps, player).unwrap().games;
+    let mut games_by_opponent = query_games_by_opponent(deps, player).unwrap().games;
+
+    games.append(&mut games_by_host);
+    games.append(&mut games_by_opponent);
 
     Ok(GamesListResponse {
-        games: games_by_player,
+        games: games,
     })
 }
 
-fn query_games_by_host(deps: Deps, host: Addr) -> StdResult<GamesListResponse> {
-    let games_by_host = GAMES
-        .prefix(&host)
+fn query_games_by_host(deps: Deps, host: &Addr) -> StdResult<GamesListResponse> {
+    let games_by_host = games()
+        .idx
+        .host
+        .prefix(host.clone())
         .range(deps.storage, None, None, Order::Ascending)
-        .flat_map(|item| match item {
-            Ok((_, data)) => Some(data),
-            _ => None,
-        })
+        .map(|kv_item| kv_item.unwrap().1)
         .collect::<Vec<_>>();
 
     Ok(GamesListResponse {
@@ -158,13 +170,13 @@ fn query_games_by_host(deps: Deps, host: Addr) -> StdResult<GamesListResponse> {
     })
 }
 
-fn query_games_by_opponent(deps: Deps, opponent: Addr) -> StdResult<GamesListResponse> {
-    let games_by_opponent = GAMES
+fn query_games_by_opponent(deps: Deps, opponent: &Addr) -> StdResult<GamesListResponse> {
+    let games_by_opponent = games()
+        .idx
+        .opponent
+        .prefix(opponent.clone())
         .range(deps.storage, None, None, Order::Ascending)
-        .flat_map(|r| match r {
-            Ok((_, data)) if data.opponent == Some(Addr::unchecked(&opponent)) => Some(data),
-            _ => None,
-        })
+        .map(|kv_item| kv_item.unwrap().1)
         .collect::<Vec<_>>();
 
     Ok(GamesListResponse {
@@ -500,10 +512,6 @@ mod tests {
             opp_move: None,
             result: None,
         };
-
-        fn generate_key_for_game(game: &Game) -> (Addr, Addr) {
-            (game.host.clone(), game.opponent.clone().unwrap())
-        }
 
         games()
             .update(

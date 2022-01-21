@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use cosmwasm_std::Addr;
-use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex, UniqueIndex};
+use cw_storage_plus::{Index, IndexList, IndexedMap, Item, MultiIndex, UniqueIndex};
 
 use cw_controllers::{Admin, Hooks};
 
@@ -38,8 +38,6 @@ pub struct Game {
     pub opp_move: Option<GameMove>,
     pub result: Option<GameResult>,
 }
-
-pub const GAMES: Map<(&Addr, &Addr), Game> = Map::new("games");
 
 // INDEXED MAP
 
