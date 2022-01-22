@@ -22,6 +22,9 @@ pub enum ContractError {
     // this should never happen, it's just to exhaust arms in result match
     #[error("Game result not found")]
     GameResultNotFound {},
+
+    #[error("Cannot finish the game")]
+    CannotFinishGame {},
     // Add any other custom errors you like here.
     // Look at https://docs.rs/thiserror/1.0.21/thiserror/ for details.
 }

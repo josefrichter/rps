@@ -1,7 +1,7 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Order, Response, StdResult,
+    to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Order, Response, StdError, StdResult,
 };
 use cw2::set_contract_version;
 
@@ -10,7 +10,7 @@ use cw_utils::maybe_addr;
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, GamesListResponse, InstantiateMsg, QueryMsg};
-use crate::state::{Game, GameMove, ADMIN, BLACKLIST, games, GameResult};
+use crate::state::{games, Game, GameMove, GameResult, ADMIN, BLACKLIST};
 
 const CONTRACT_NAME: &str = "crates.io:rps";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -76,8 +76,8 @@ pub fn try_startgame(
     }
 
     let game = Game {
-        host: info.sender.clone(),                // TODO: need to clone() here?
-        opponent: checked_opponent.clone(), // TODO: need to clone() here?
+        host: info.sender.clone(),
+        opponent: checked_opponent.clone(),
         host_move: host_move,
         opponent_move: None,
         result: None,
@@ -85,33 +85,37 @@ pub fn try_startgame(
 
     match save_game(deps, game) {
         Ok(_game) => Ok(Response::new().add_attribute("method", "try_startgame")),
-        Err(e) => Err(e)
+        Err(e) => Err(e),
     }
     // Ok(Response::new().add_attribute("method", "try_startgame"))
 }
 
 pub fn save_game(deps: DepsMut, game: Game) -> Result<Game, ContractError> {
-    games()
-        .update( // update will fail on duplicate record
-            deps.storage,
-            generate_key_for_game(&game),
-            |old| match old {
-                Some(_) => Err(ContractError::DuplicateGame {}),
-                None => Ok(game),
-            },
-        )
+    games().update(
+        // update will fail on duplicate record
+        deps.storage,
+        generate_key_for_game(&game),
+        |old| match old {
+            Some(_) => Err(ContractError::DuplicateGame {}),
+            None => Ok(game),
+        },
+    )
 }
 
-pub fn update_game(deps: DepsMut, game: Game) -> Result<Game, ContractError> {
-    games()
-        .update( // update will fail on duplicate record
-            deps.storage,
-            generate_key_for_game(&game),
-            |old| match old {
-                Some(_) => Ok(game),
-                None => Err(ContractError::GameNotFound {}),
-            },
-        )
+pub fn update_game(deps: &mut DepsMut, game: Game) -> Result<Game, ContractError> {
+    games().update(
+        // update will fail on duplicate record
+        deps.storage,
+        generate_key_for_game(&game),
+        |old| match old {
+            Some(_) => Ok(game),
+            None => Err(ContractError::GameNotFound {}),
+        },
+    )
+}
+
+pub fn delete_game(deps: &mut DepsMut, game: Game) -> Result<(), StdError> {
+    games().remove(deps.storage, generate_key_for_game(&game))
 }
 
 pub fn generate_key_for_game(game: &Game) -> (Addr, Addr) {
@@ -119,7 +123,7 @@ pub fn generate_key_for_game(game: &Game) -> (Addr, Addr) {
 }
 
 pub fn try_endgame(
-    deps: DepsMut,
+    mut deps: DepsMut,
     info: MessageInfo,
     host: Addr,
     opponent_move: GameMove,
@@ -131,9 +135,7 @@ pub fn try_endgame(
     let blacklist = BLACKLIST.query_hooks(deps.as_ref())?;
 
     if blacklist.hooks.contains(&checked_host.to_string()) {
-        return Err(ContractError::Blacklisted {
-            addr: checked_host,
-        });
+        return Err(ContractError::Blacklisted { addr: checked_host });
     }
 
     // check if this message sender isn't blacklisted
@@ -166,20 +168,35 @@ pub fn try_endgame(
 
         // same moves = tie
         (move1, move2) if (move1 == move2) => GameResult::Tie {},
-        (_, _) => return Err(ContractError::GameResultNotFound {})
+        (_, _) => return Err(ContractError::GameResultNotFound {}),
     };
 
     // update map accordingly
     game.opponent_move = Some(opponent_move);
-    game.result = Some(result);
+    game.result = Some(result.clone());
 
-    match update_game(deps, game) {
+    // ## actually, if I understand the docs here https://academy.terra.money/courses/take/cosmwasm-smart-contracts-i/assignments/27056622-building-out-the-rps-game
+    // ## the final state of the game is not saved in cotract
+    // ## it's just verifiable on chain (by including it in response?)
+    let updated_game = match update_game(&mut deps, game) {
         // TODO: add result to response?
-        Ok(_game) => Ok(Response::new().add_attribute("method", "try_endgame")),
-        Err(e) => Err(e)
-    }
+        Ok(game) => game,
+        Err(e) => return Err(e),
+    };
 
     // TODO: delete game?
+    let result_string = match result {
+        GameResult::Tie {} => "Tie",
+        GameResult::HostWins {} => "Host won",
+        GameResult::OpponentWins {} => "Opponent won",
+    };
+
+    match delete_game(&mut deps, updated_game) {
+        Ok(_) => Ok(Response::new()
+            .add_attribute("method", "try_endgame")
+            .add_attribute("game_result", result_string)),
+        Err(_) => Err(ContractError::CannotFinishGame {}),
+    }
 }
 
 pub fn try_updateadmin(
@@ -231,9 +248,7 @@ fn query_games(deps: Deps, player: &Addr) -> StdResult<GamesListResponse> {
     games.append(&mut games_by_host);
     games.append(&mut games_by_opponent);
 
-    Ok(GamesListResponse {
-        games: games,
-    })
+    Ok(GamesListResponse { games: games })
 }
 
 fn query_games_by_host(deps: Deps, host: &Addr) -> StdResult<GamesListResponse> {
@@ -272,7 +287,7 @@ fn query_admin(deps: Deps) -> StdResult<AdminResponse> {
 mod tests {
     use super::*;
     use crate::msg::GamesListResponse;
-    use crate::state::{Game, GameMove, games};
+    use crate::state::{games, Game, GameMove};
     use cosmwasm_std::testing::{
         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
     };
@@ -322,8 +337,27 @@ mod tests {
         // cast opponent vote
         // compare host vs opponent vote to select result
         // return updated Game
-    }
 
+        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+
+        let info = mock_info("host", &coins(2, "token"));
+        let msg = ExecuteMsg::StartGame {
+            opponent: Addr::unchecked("opponent"),
+            host_move: GameMove::Scissors {},
+        };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0);
+        println!("res: {:?}", res);
+
+        let info = mock_info("opponent", &coins(2, "token"));
+        let msg = ExecuteMsg::EndGame {
+            host: Addr::unchecked("host"),
+            opponent_move: GameMove::Paper {},
+        };
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res.messages.len(), 0);
+        assert_eq!(res.attributes[1].value, "Host won");
+    }
 
     #[test]
     fn add_to_and_remove_from_blacklist() {
@@ -635,7 +669,6 @@ mod tests {
             )
             .unwrap();
 
-
         // load all games
         let list = games()
             .range(&mut deps.storage, None, None, Order::Ascending)
@@ -648,14 +681,13 @@ mod tests {
         assert_eq!(t, &game11);
         assert_eq!(3, list.len());
 
-
         // load games for host1
         let list = games()
             .idx
             .host
             .prefix(host1.clone())
             .range(&mut deps.storage, None, None, Order::Ascending)
-            .collect::<Result<Vec<(_,_)>, _>>()
+            .collect::<Result<Vec<(_, _)>, _>>()
             .unwrap();
 
         println!("=== games for host1 ===");
@@ -663,7 +695,6 @@ mod tests {
         let (_, t) = &list[0];
         assert_eq!(t, &game11);
         assert_eq!(2, list.len());
-
 
         // load games for opponent2
         let list = games()
@@ -678,6 +709,5 @@ mod tests {
         println!("{:?}", list);
         assert_eq!(list[0], game12);
         assert_eq!(2, list.len());
-
     }
 }
