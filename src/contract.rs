@@ -61,10 +61,12 @@ pub fn try_startgame(
     // check Addr
     let checked_opponent: Addr = deps.api.addr_validate(&opponent.to_string())?;
 
+    // check that not trying to start game against oneself
     if checked_opponent == info.sender {
         return Err(ContractError::GameAgainstYourself {});
     }
 
+    // grab the blacklist
     let blacklist = BLACKLIST.query_hooks(deps.as_ref())?;
 
     // check if opponent isn't blacklisted
@@ -74,54 +76,58 @@ pub fn try_startgame(
         });
     }
 
-    // check if this message sender isn't blacklisted
+    // check if this message sender (i.e. host) isn't blacklisted
     if blacklist.hooks.contains(&info.sender.to_string()) {
         return Err(ContractError::Blacklisted { addr: info.sender });
     }
 
+    // create the Game struct from the submitted data
     let game = Game {
         host: info.sender.clone(),
         opponent: checked_opponent.clone(),
         host_move: host_move,
-        opponent_move: None,
-        result: None,
+        opponent_move: None, // first move by host = no move by opponent
+        result: None, // result only after opponent move
     };
 
+    // save the new struct and create response accordingly
     match save_game(deps, game) {
         Ok(_game) => Ok(Response::new().add_attribute("method", "try_startgame")),
         Err(e) => Err(e),
     }
-    // Ok(Response::new().add_attribute("method", "try_startgame"))
 }
 
+// helper function to create new game, wrapping IndexedMap update syntax
 pub fn save_game(deps: DepsMut, game: Game) -> Result<Game, ContractError> {
     games().update(
-        // update will fail on duplicate record
         deps.storage,
-        generate_key_for_game(&game),
+        generate_key_for_game(&game), // call helper function to get the key
         |old| match old {
-            Some(_) => Err(ContractError::DuplicateGame {}),
-            None => Ok(game),
+            Some(_) => Err(ContractError::DuplicateGame {}), // if the game already exists, update() will fail here. prevents overwriting.
+            None => Ok(game), // if it doesn't exist, it's created
         },
     )
 }
 
+// helper function to update existing game, wrapping IndexedMap update sytax
+// unlike save_game(), this one will fail if the game doesn't exist yet
 pub fn update_game(deps: &mut DepsMut, game: Game) -> Result<Game, ContractError> {
     games().update(
-        // update will fail on duplicate record
         deps.storage,
         generate_key_for_game(&game),
         |old| match old {
-            Some(_) => Ok(game),
-            None => Err(ContractError::GameNotFound {}),
+            Some(_) => Ok(game), // if game exists, update it
+            None => Err(ContractError::GameNotFound {}), // if game doesn't exist yet, fail
         },
     )
 }
 
+// helper to wrap IndexedMap delete syntax
 pub fn delete_game(deps: &mut DepsMut, game: Game) -> Result<(), StdError> {
     games().remove(deps.storage, generate_key_for_game(&game))
 }
 
+// helper that will create (host, opponent) tuple key from Game struct
 pub fn generate_key_for_game(game: &Game) -> (Addr, Addr) {
     (game.host.clone(), game.opponent.clone())
 }
@@ -138,6 +144,7 @@ pub fn try_endgame(
     // however, he could have gotten blacklisted after starting the game...
     let blacklist = BLACKLIST.query_hooks(deps.as_ref())?;
 
+    // check if host is not blacklisted (got blacklisted after the game was started)
     if blacklist.hooks.contains(&checked_host.to_string()) {
         return Err(ContractError::Blacklisted { addr: checked_host });
     }
@@ -187,12 +194,14 @@ pub fn try_endgame(
         Err(e) => return Err(e),
     };
 
+    // get a human friendly string message
     let result_string = match result {
         GameResult::Tie {} => "Tie",
         GameResult::HostWins {} => "Host won",
         GameResult::OpponentWins {} => "Opponent won",
     };
 
+    // delete the game from the IndexedMap and create a response with game_result
     match delete_game(&mut deps, updated_game) {
         Ok(_) => Ok(Response::new()
             .add_attribute("method", "try_endgame")
@@ -206,6 +215,9 @@ pub fn try_updateadmin(
     info: MessageInfo,
     admin: Addr,
 ) -> Result<Response, AdminError> {
+    // this is using ADMIN controller from cw_controllers
+    // to set a new contract admin
+    // it also checks that only current admin can set the new admin
     let maybe_admin = maybe_addr(deps.api, Some(admin.to_string()))?;
     ADMIN.execute_update_admin(deps, info, maybe_admin)
 }
@@ -216,6 +228,7 @@ pub fn try_addtoblacklist(
     info: MessageInfo,
     addr: Addr,
 ) -> Result<Response, HookError> {
+    // this is using HOOKS controller from cw_controllers
     let checked_addr = deps.api.addr_validate(&addr.to_string())?;
     BLACKLIST.execute_add_hook(&admin, deps, info, checked_addr)
 }
@@ -243,6 +256,8 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 }
 
 fn query_games(deps: Deps, player: &Addr) -> StdResult<GamesListResponse> {
+    // get games for given Addr
+    // where the Addr is either a host or an opponent
     let mut games = vec![];
     let mut games_by_host = query_games_by_host(deps, player).unwrap().games;
     let mut games_by_opponent = query_games_by_opponent(deps, player).unwrap().games;
@@ -254,12 +269,13 @@ fn query_games(deps: Deps, player: &Addr) -> StdResult<GamesListResponse> {
 }
 
 fn query_games_by_host(deps: Deps, host: &Addr) -> StdResult<GamesListResponse> {
+    // get games for given host Addr
     let games_by_host = games()
         .idx
         .host
         .prefix(host.clone())
         .range(deps.storage, None, None, Order::Ascending)
-        .map(|kv_item| kv_item.unwrap().1)
+        .map(|kv_item| kv_item.unwrap().1) // reformat it so that we get a vector of Game structs
         .collect::<Vec<_>>();
 
     Ok(GamesListResponse {
@@ -268,12 +284,13 @@ fn query_games_by_host(deps: Deps, host: &Addr) -> StdResult<GamesListResponse> 
 }
 
 fn query_games_by_opponent(deps: Deps, opponent: &Addr) -> StdResult<GamesListResponse> {
+    // get games for given opponent Addr
     let games_by_opponent = games()
         .idx
         .opponent
         .prefix(opponent.clone())
         .range(deps.storage, None, None, Order::Ascending)
-        .map(|kv_item| kv_item.unwrap().1)
+        .map(|kv_item| kv_item.unwrap().1) // reformat it so that we get a vector of Game structs
         .collect::<Vec<_>>();
 
     Ok(GamesListResponse {
@@ -281,6 +298,7 @@ fn query_games_by_opponent(deps: Deps, opponent: &Addr) -> StdResult<GamesListRe
     })
 }
 
+// who's the contract admin?
 fn query_admin(deps: Deps) -> StdResult<AdminResponse> {
     Ok(ADMIN.query_admin(deps)?)
 }
