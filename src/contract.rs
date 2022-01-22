@@ -1,5 +1,3 @@
-// use std::ops::RangeBounds;
-
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
@@ -12,7 +10,7 @@ use cw_utils::maybe_addr;
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, GamesListResponse, InstantiateMsg, QueryMsg};
-use crate::state::{Game, GameMove, ADMIN, BLACKLIST, games};
+use crate::state::{Game, GameMove, ADMIN, BLACKLIST, games, GameResult};
 
 const CONTRACT_NAME: &str = "crates.io:rps";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -42,6 +40,10 @@ pub fn execute(deps: DepsMut, _env: Env, info: MessageInfo, msg: ExecuteMsg) -> 
             opponent,
             host_move,
         } => Ok(try_startgame(deps, info, opponent, host_move)?),
+        ExecuteMsg::EndGame {
+            host,
+            opponent_move,
+        } => Ok(try_endgame(deps, info, host, opponent_move)?),
         ExecuteMsg::UpdateAdmin { admin } => Ok(try_updateadmin(deps, info, admin)?),
         ExecuteMsg::AddToBlacklist { addr } => Ok(try_addtoblacklist(ADMIN, deps, info, addr)?),
         ExecuteMsg::RemoveFromBlacklist { addr } => {
@@ -58,14 +60,17 @@ pub fn try_startgame(
 ) -> Result<Response, ContractError> {
     // check Addr
     let checked_opponent: Addr = deps.api.addr_validate(&opponent.to_string())?;
+
     let blacklist = BLACKLIST.query_hooks(deps.as_ref())?;
 
+    // check if opponent isn't blacklisted
     if blacklist.hooks.contains(&checked_opponent.to_string()) {
         return Err(ContractError::Blacklisted {
             addr: checked_opponent,
         });
     }
 
+    // check if this message sender isn't blacklisted
     if blacklist.hooks.contains(&info.sender.to_string()) {
         return Err(ContractError::Blacklisted { addr: info.sender });
     }
@@ -74,7 +79,7 @@ pub fn try_startgame(
         host: info.sender.clone(),                // TODO: need to clone() here?
         opponent: checked_opponent.clone(), // TODO: need to clone() here?
         host_move: host_move,
-        opp_move: None,
+        opponent_move: None,
         result: None,
     };
 
@@ -97,10 +102,85 @@ pub fn save_game(deps: DepsMut, game: Game) -> Result<Game, ContractError> {
         )
 }
 
+pub fn update_game(deps: DepsMut, game: Game) -> Result<Game, ContractError> {
+    games()
+        .update( // update will fail on duplicate record
+            deps.storage,
+            generate_key_for_game(&game),
+            |old| match old {
+                Some(_) => Ok(game),
+                None => Err(ContractError::GameNotFound {}),
+            },
+        )
+}
+
 pub fn generate_key_for_game(game: &Game) -> (Addr, Addr) {
     (game.host.clone(), game.opponent.clone())
 }
 
+pub fn try_endgame(
+    deps: DepsMut,
+    info: MessageInfo,
+    host: Addr,
+    opponent_move: GameMove,
+) -> Result<Response, ContractError> {
+    // check Addr
+    let checked_host: Addr = deps.api.addr_validate(&host.to_string())?;
+    // might not be necessary to check host against blacklist, coz he couldn't have started the game if blacklisted
+    // however, he could have gotten blacklisted after starting the game...
+    let blacklist = BLACKLIST.query_hooks(deps.as_ref())?;
+
+    if blacklist.hooks.contains(&checked_host.to_string()) {
+        return Err(ContractError::Blacklisted {
+            addr: checked_host,
+        });
+    }
+
+    // check if this message sender isn't blacklisted
+    if blacklist.hooks.contains(&info.sender.to_string()) {
+        return Err(ContractError::Blacklisted { addr: info.sender });
+    }
+
+    // lookup game by host, opponent
+    let opponent = info.sender;
+    let game_res = games().may_load(deps.storage, (checked_host, opponent));
+    let mut game = match game_res {
+        Ok(Some(game)) => game,
+        Ok(None) => return Err(ContractError::GameNotFound {}),
+        Err(_e) => return Err(ContractError::GameNotFound {}),
+    };
+
+    // find out game result
+    let result = match (&game.host_move, &opponent_move) {
+        // host starts with Rock
+        (GameMove::Rock {}, GameMove::Paper {}) => GameResult::OpponentWins {},
+        (GameMove::Rock {}, GameMove::Scissors {}) => GameResult::HostWins {},
+
+        // host starts with Paper
+        (GameMove::Paper {}, GameMove::Rock {}) => GameResult::HostWins {},
+        (GameMove::Paper {}, GameMove::Scissors {}) => GameResult::OpponentWins {},
+
+        // host starts with Scissors
+        (GameMove::Scissors {}, GameMove::Rock {}) => GameResult::OpponentWins {},
+        (GameMove::Scissors {}, GameMove::Paper {}) => GameResult::HostWins {},
+
+        // same moves = tie
+        (move1, move2) if (move1 == move2) => GameResult::Tie {},
+        (_, _) => return Err(ContractError::GameResultNotFound {})
+    };
+
+    // update map accordingly
+    game.opponent_move = Some(opponent_move);
+    game.result = Some(result);
+
+    match update_game(deps, game) {
+        // TODO: add result to response?
+        Ok(_game) => Ok(Response::new().add_attribute("method", "try_endgame")),
+        Err(e) => Err(e)
+    }
+
+    // TODO: delete game?
+}
 
 pub fn try_updateadmin(
     deps: DepsMut,
@@ -235,6 +315,15 @@ mod tests {
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(res.messages.len(), 0); // TODO: is this a correct test?
     }
+
+    #[test]
+    fn end_game() {
+        // check that sender (opponent) is not equal to host
+        // cast opponent vote
+        // compare host vs opponent vote to select result
+        // return updated Game
+    }
+
 
     #[test]
     fn add_to_and_remove_from_blacklist() {
@@ -450,7 +539,7 @@ mod tests {
                 host: Addr::unchecked("tony"),
                 opponent: Addr::unchecked("oprah"),
                 host_move: GameMove::Scissors {},
-                opp_move: None,
+                opponent_move: None,
                 result: None
             }]
         )
@@ -491,7 +580,7 @@ mod tests {
             host: host1.clone(),
             opponent: opponent1.clone(),
             host_move: GameMove::Rock {},
-            opp_move: None,
+            opponent_move: None,
             result: None,
         };
 
@@ -500,7 +589,7 @@ mod tests {
             host: host1.clone(),
             opponent: opponent2.clone(),
             host_move: GameMove::Paper {},
-            opp_move: None,
+            opponent_move: None,
             result: None,
         };
 
@@ -509,7 +598,7 @@ mod tests {
             host: host2.clone(),
             opponent: opponent2.clone(),
             host_move: GameMove::Paper {},
-            opp_move: None,
+            opponent_move: None,
             result: None,
         };
 
