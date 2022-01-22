@@ -25,6 +25,9 @@ pub enum ContractError {
 
     #[error("Cannot finish the game")]
     CannotFinishGame {},
+
+    #[error("Cannot start game against yourself")]
+    GameAgainstYourself {},
     // Add any other custom errors you like here.
     // Look at https://docs.rs/thiserror/1.0.21/thiserror/ for details.
 }

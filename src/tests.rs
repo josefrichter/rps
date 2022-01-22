@@ -1,8 +1,5 @@
 use crate::contract::*;
 
-// use cosmwasm_std::entry_point;
-use cosmwasm_std::{Addr, Order};
-
 use cw_controllers::AdminResponse;
 
 use crate::error::ContractError;
@@ -12,7 +9,7 @@ use crate::state::{games, Game, GameMove, BLACKLIST};
 use cosmwasm_std::testing::{
     mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
 };
-use cosmwasm_std::{coins, from_binary};
+use cosmwasm_std::{coins, from_binary, Addr, Order};
 
 #[test]
 fn proper_initialization() {
@@ -32,6 +29,7 @@ fn proper_initialization() {
 fn start_game() {
     let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
 
+    // starting game against invalid Addr will fail
     let info = mock_info("anyone", &coins(2, "token"));
     let msg = ExecuteMsg::StartGame {
         opponent: Addr::unchecked(""),
@@ -42,6 +40,15 @@ fn start_game() {
     //     matches!(err, ContractError::Std(StdError::GenericErr { msg: _ })),
     // );
 
+    // starting game against oneself will fail
+    let info = mock_info("oneself", &coins(2, "token"));
+    let msg = ExecuteMsg::StartGame {
+        opponent: Addr::unchecked("oneself"),
+        host_move: GameMove::Scissors {},
+    };
+    let _err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+
+    // starting game with correct data will succeed
     let info = mock_info("anyone", &coins(2, "token"));
     let msg = ExecuteMsg::StartGame {
         opponent: Addr::unchecked("oprah"),
@@ -52,7 +59,7 @@ fn start_game() {
 }
 
 #[test]
-fn end_game() {
+fn end_game_with_losing_move() {
     // check that sender (opponent) is not equal to host
     // cast opponent vote
     // compare host vs opponent vote to select result
@@ -60,6 +67,7 @@ fn end_game() {
 
     let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
 
+    // start game with a move
     let info = mock_info("host", &coins(2, "token"));
     let msg = ExecuteMsg::StartGame {
         opponent: Addr::unchecked("opponent"),
@@ -67,8 +75,8 @@ fn end_game() {
     };
     let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
     assert_eq!(res.messages.len(), 0);
-    println!("res: {:?}", res);
 
+    // end game with losing move should succeed
     let info = mock_info("opponent", &coins(2, "token"));
     let msg = ExecuteMsg::EndGame {
         host: Addr::unchecked("host"),
@@ -77,6 +85,54 @@ fn end_game() {
     let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
     assert_eq!(res.messages.len(), 0);
     assert_eq!(res.attributes[1].value, "Host won");
+}
+
+#[test]
+fn end_game_with_winning_move() {
+    let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+
+    // start game with a move
+    let info = mock_info("host", &coins(2, "token"));
+    let msg = ExecuteMsg::StartGame {
+        opponent: Addr::unchecked("opponent"),
+        host_move: GameMove::Scissors {},
+    };
+    let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+    assert_eq!(res.messages.len(), 0);
+
+    // end game with winning move should succeed
+    let info = mock_info("opponent", &coins(2, "token"));
+    let msg = ExecuteMsg::EndGame {
+        host: Addr::unchecked("host"),
+        opponent_move: GameMove::Rock {},
+    };
+    let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+    assert_eq!(res.messages.len(), 0);
+    assert_eq!(res.attributes[1].value, "Opponent won");
+}
+
+#[test]
+fn end_game_with_tie_move() {
+    let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+
+    // start game with a move
+    let info = mock_info("host", &coins(2, "token"));
+    let msg = ExecuteMsg::StartGame {
+        opponent: Addr::unchecked("opponent"),
+        host_move: GameMove::Scissors {},
+    };
+    let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+    assert_eq!(res.messages.len(), 0);
+
+    // end game with winning move should succeed
+    let info = mock_info("opponent", &coins(2, "token"));
+    let msg = ExecuteMsg::EndGame {
+        host: Addr::unchecked("host"),
+        opponent_move: GameMove::Scissors {},
+    };
+    let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+    assert_eq!(res.messages.len(), 0);
+    assert_eq!(res.attributes[1].value, "Tie");
 }
 
 #[test]
@@ -220,6 +276,103 @@ fn cannot_start_game_against_blacklisted() {
     };
     let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
     assert_eq!(res.messages.len(), 0);
+}
+
+#[test]
+fn blacklisted_cannot_end_game() {
+    // this is a situation where a game was started against non-blacklisted opponent
+    // and then the opponent got blacklisted
+    // so now he's not allowed to end the game (TODO: delete games with blacklisted players?)
+    let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+
+    // instantiate by "creator", with admin "creator"
+    let info = mock_info("creator", &coins(1000, "earth"));
+    let msg = InstantiateMsg {
+        admin: Addr::unchecked("creator"),
+    };
+    let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+    assert_eq!(0, res.messages.len());
+
+    // start game by "creator" against "black" again should succeed initially
+    let info = mock_info("creator", &coins(2, "token"));
+    let msg = ExecuteMsg::StartGame {
+        opponent: Addr::unchecked("black"),
+        host_move: GameMove::Scissors {},
+    };
+    let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+    assert_eq!(res.messages.len(), 0);
+
+    // add "black" to blacklist
+    let info = mock_info("creator", &coins(2, "token"));
+    let msg = ExecuteMsg::AddToBlacklist {
+        addr: Addr::unchecked("black"),
+    };
+    let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+    assert_eq!(res.messages.len(), 0); // TODO: is this a correct test?
+
+    // end game by "black" should fail
+    let info = mock_info("black", &coins(2, "token"));
+    let msg = ExecuteMsg::EndGame {
+        host: Addr::unchecked("creator"),
+        opponent_move: GameMove::Scissors {},
+    };
+    let err = execute(deps.as_mut(), mock_env(), info, msg);
+    let err_unwrapped = err.unwrap_err().downcast::<ContractError>().unwrap();
+    assert_eq!(
+        *err_unwrapped,
+        ContractError::Blacklisted {
+            addr: Addr::unchecked("black")
+        }
+    );
+}
+
+#[test]
+fn cannot_end_game_against_blacklisted() {
+    // user starts a game
+    // user gets blacklisted
+    // opponent tries to end that game
+    // it should fail, because host is blacklisted
+    let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+
+    // instantiate by "creator", with admin "creator"
+    let info = mock_info("creator", &coins(1000, "earth"));
+    let msg = InstantiateMsg {
+        admin: Addr::unchecked("admin"),
+    };
+    let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+    assert_eq!(0, res.messages.len());
+
+    // start game by "creator" against "opponent" again should succeed initially
+    let info = mock_info("creator", &coins(2, "token"));
+    let msg = ExecuteMsg::StartGame {
+        opponent: Addr::unchecked("opponent"),
+        host_move: GameMove::Scissors {},
+    };
+    let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+    assert_eq!(res.messages.len(), 0);
+
+    // add "creator" to blacklist by "admin"
+    let info = mock_info("admin", &coins(2, "token"));
+    let msg = ExecuteMsg::AddToBlacklist {
+        addr: Addr::unchecked("creator"),
+    };
+    let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+    assert_eq!(res.messages.len(), 0); // TODO: is this a correct test?
+
+    // end game by "opponent" should fail, because "creator" is blacklisted
+    let info = mock_info("opponent", &coins(2, "token"));
+    let msg = ExecuteMsg::EndGame {
+        host: Addr::unchecked("creator"),
+        opponent_move: GameMove::Scissors {},
+    };
+    let err = execute(deps.as_mut(), mock_env(), info, msg);
+    let err_unwrapped = err.unwrap_err().downcast::<ContractError>().unwrap();
+    assert_eq!(
+        *err_unwrapped,
+        ContractError::Blacklisted {
+            addr: Addr::unchecked("creator")
+        }
+    );
 }
 
 #[test]

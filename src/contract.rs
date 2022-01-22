@@ -61,6 +61,10 @@ pub fn try_startgame(
     // check Addr
     let checked_opponent: Addr = deps.api.addr_validate(&opponent.to_string())?;
 
+    if checked_opponent == info.sender {
+        return Err(ContractError::GameAgainstYourself {});
+    }
+
     let blacklist = BLACKLIST.query_hooks(deps.as_ref())?;
 
     // check if opponent isn't blacklisted
