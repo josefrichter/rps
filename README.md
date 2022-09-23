@@ -47,7 +47,7 @@ I hear that especially `IndexedMap` wouldn't work on `0.16.2`, but haven't tried
 
 However these indices are used only for query functions, so that they can be used in UI to show games for given Addr. The core game logic doesn't need them - when the opponent vote is being cast, the `(host, opponent)` tuple is known at that point.
 
-There is very limited documentation for `IndexedMap` right now (Januery 2022), I used mainly these resources:
+There is very limited documentation for `IndexedMap` right now (January 2022), I used mainly these resources:
 
 - https://github.com/CosmWasm/cw-plus/blob/main/packages/storage-plus/README.md
 - https://docs.cosmwasm.com/tutorials/storage/indexes (this one helped a lot)
